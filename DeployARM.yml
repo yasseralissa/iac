@@ -1,0 +1,178 @@
+parameters:
+  - name: actionName
+    type: string
+    default:
+  - name: serviceConnection
+    type: string
+    # default: ${{ variables.serviceConnection }}
+  - name: location
+    type: string
+    default: $(defaultResourceLocation)
+  - name: resourceGroupName
+    type: string
+  - name: csmFile
+    type: string
+  - name: csmParametersFile
+    type: string
+    default:
+  - name: overrideParameters
+    type: string
+    default:
+  - name: environment
+    type: string
+    default: $(environment)
+  - name: subscriptionId
+    type: string
+    default: $(subscriptionId)
+  - name: enabled
+    type: boolean
+    default: true
+  - name: findValues
+    type: object
+    default:
+  - name: deploymentMode
+    type: string
+    default: Incremental
+  - name: deploymentScope
+    type: string
+    default: Resource Group
+steps:
+  - powershell: |
+
+      $variables = $env:variables | ConvertFrom-Json
+      $parameters = $env:parameters | ConvertFrom-Json
+      $overrideParameters = $parameters.overrideParameters
+
+      Write-Host "variables:"
+      Write-Host $variables | ConvertTo-Json
+
+      Write-Host "parameters:"
+      Write-Host $parameters | ConvertTo-Json
+
+      if ($overrideParameters) {
+        Write-Host "##vso[task.setvariable variable=overrideParameters;]$overrideParameters"
+        return
+      }
+
+      # Function to get parameter names from a Bicep file
+      function Get-BicepParameters {
+          [CmdletBinding()]
+          param (
+              [Parameter(Mandatory = $true)]
+              [string] $FilePath
+          )
+
+          if (-Not (Test-Path $FilePath)) {
+              Write-Host "The specified Bicep file does not exist."
+              return
+          }
+
+          $bicepContent = Get-Content -Path $FilePath
+
+          $parameters = @()
+
+          foreach ($line in $bicepContent) {
+              # Skip commented and empty lines
+              if ($line -match '^\s*//') { continue }
+              if ($line -match '^\s*$') { continue }
+
+              # Extract parameter name
+              if ($line -match 'param\s+(\w+)\s+\w+') {
+                  $parameters += $matches[1]
+              }
+          }
+
+          return $parameters
+      }
+
+      function Get-JsonParameters {
+          [CmdletBinding()]
+          param (
+              [Parameter(Mandatory = $true)]
+              [string] $FilePath
+          )
+
+          # Read the ARM template file
+          $jsonContent = Get-Content -Path $FilePath -Raw | ConvertFrom-Json
+
+          # Get the parameter keys from the ARM template
+          $parameters = $jsonContent.parameters | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name
+
+          return $parameters
+      }
+        
+      $armTemplatePath = $parameters.csmFile
+
+      if (-Not (Test-Path $armTemplatePath)) {
+          Write-Host "The specified file does not exist."
+          return
+      }
+
+      $extension = [System.IO.Path]::GetExtension($armTemplatePath).ToLower()
+
+      switch ($extension) {
+          ".json" {
+              Write-Host "The file is a JSON file."
+              $params = Get-JsonParameters -FilePath $armTemplatePath
+
+          }
+          ".bicep" {
+              Write-Host "The file is a Bicep file."
+              $params = Get-BicepParameters -FilePath $armTemplatePath
+          }
+          default {
+              Write-Host "The file is neither a JSON nor a Bicep file."
+              return;
+          }
+      }
+
+
+      $parameterValueString = ""
+
+      foreach ($key in $params) {
+          $value = $null;
+          foreach ($v in $variables) {
+              $value = $v.$key;
+
+              if ($value -ne $null) {
+                  break
+              }
+          }
+          if ($value -eq $null) {
+              Write-Host "Value not found for parameter: $key"
+          }
+          else {
+              $parameterValueString += "-" + $key + " " + ($value | ConvertTo-Json -Compress) + " "
+          }
+      }
+      # Remove any trailing white spaces
+      $parameterValueString = $parameterValueString.Trim()
+      Write-Host "Parameter-Value String: $parameterValueString"
+
+      Write-Host "##vso[task.setvariable variable=overrideParameters;]$parameterValueString"
+
+    env:
+      variables: ${{convertToJson(parameters.findValues)}}
+      parameters: ${{convertToJson(parameters)}}
+
+  # - powershell: |
+  #     Write-Host $env:overrideParameters
+  #   env:
+  #     overrideParameters: $(overrideParameters)
+  #   displayName: show override results
+
+  - task: AzureResourceManagerTemplateDeployment@3
+    displayName: ${{ parameters.actionName }}
+    condition: ${{parameters.enabled}}
+    inputs:
+      action: Create Or Update Resource Group
+      azureResourceManagerConnection: ${{ parameters.serviceConnection }}
+      csmFile: ${{ parameters.csmFile }} # Make sure to search in the drop (artifact) folder
+      csmParametersFile: ${{ parameters.csmParametersFile }} #
+      subscriptionId: ${{ parameters.subscriptionId }}
+      deploymentMode: ${{ parameters.deploymentMode }}
+      deploymentScope: ${{ parameters.deploymentScope }}
+      location: ${{ parameters.location }}
+      overrideParameters: $(overrideParameters)
+      resourceGroupName: ${{ parameters.resourceGroupName }}
+      templateLocation: Linked artifact
