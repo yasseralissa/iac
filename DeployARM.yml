@@ -2,12 +2,12 @@ parameters:
   - name: actionName
     type: string
     default:
-  - name: serviceConnection
+  - name: azureResourceManagerConnection
     type: string
-    # default: ${{ variables.serviceConnection }}
+    # default: ${{ variables.azureResourceManagerConnection }}
   - name: location
     type: string
-    default: $(defaultResourceLocation)
+    # default: $(defaultResourceLocation)
   - name: resourceGroupName
     type: string
   - name: csmFile
@@ -23,7 +23,7 @@ parameters:
     default: $(environment)
   - name: subscriptionId
     type: string
-    default: $(subscriptionId)
+    # default: $(subscriptionId)
   - name: enabled
     type: boolean
     default: true
@@ -166,7 +166,7 @@ steps:
     condition: ${{parameters.enabled}}
     inputs:
       action: Create Or Update Resource Group
-      azureResourceManagerConnection: ${{ parameters.serviceConnection }}
+      azureResourceManagerConnection: ${{ parameters.azureResourceManagerConnection }}
       csmFile: ${{ parameters.csmFile }} # Make sure to search in the drop (artifact) folder
       csmParametersFile: ${{ parameters.csmParametersFile }} #
       subscriptionId: ${{ parameters.subscriptionId }}
